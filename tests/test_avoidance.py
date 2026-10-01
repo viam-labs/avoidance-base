@@ -78,6 +78,8 @@ def test_stale_cloud_and_near_obstacle_stop_the_child():
         await near.set_velocity(Vector3(x=0, y=1000, z=0), Vector3(x=0, y=0, z=0))
         assert near_child.velocities == []
         assert near_child.stopped == 1
+        await near.set_velocity(Vector3(x=0, y=-400, z=0), Vector3(x=0, y=0, z=0))
+        assert near_child.velocities[-1][0] == pytest.approx(-400)
 
         far, far_child = _ready(np.array([[0.0, 0.85]]))
         await far.set_velocity(Vector3(x=0, y=1000, z=0), Vector3(x=0, y=0, z=0))

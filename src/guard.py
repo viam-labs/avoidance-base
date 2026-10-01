@@ -3,10 +3,12 @@
 The body sits at the origin: +Y is forward, +X is right, +yaw is CCW.
 Commanded planar speed is scaled so the padded footprint stays
 ``time_to_collision_s`` from the next hit, and is zeroed when the remaining
-distance is inside ``stop_gap_m``. Curvature is preserved by scaling yaw with
-the same ratio. This matches Nav2's collision-monitor approach model and
-nav-stack's ``v = (free - stop_gap) / time_to_collision`` law. It does not
-steer around obstacles.
+distance is inside ``stop_gap_m``. A command that is already in contact is
+zeroed only when it does not drive out of that contact, so backing away from
+a wall ahead still works. Curvature is preserved by scaling yaw with the same
+ratio. This matches Nav2's collision-monitor approach model and nav-stack's
+``v = (free - stop_gap) / time_to_collision`` law. It does not steer around
+obstacles.
 """
 
 from __future__ import annotations
@@ -100,6 +102,54 @@ def _result(twist: Twist, scale: float, free_m: float) -> GuardResult:
     return GuardResult(twist.scaled(scale), _action_for(scale), free_m)
 
 
+def _without_departing_contact(
+    twist: Twist,
+    points: np.ndarray,
+    half_width: float,
+    half_length: float,
+    min_points: int,
+) -> tuple[np.ndarray, bool]:
+    """Drop padding points this command moves outward, or refuse the command.
+
+    The second value is true when points already inside the padded footprint
+    are not being left, so the command would keep pressing into them.
+    """
+    stopped = twist.planar_speed < 1e-4 and abs(twist.wz_rad_s) < 1e-4
+    if points.size == 0 or stopped:
+        inside = (
+            (np.abs(points[:, 0]) <= half_width) & (np.abs(points[:, 1]) <= half_length)
+            if points.size
+            else np.zeros(0, dtype=bool)
+        )
+        return points, int(inside.sum()) >= min_points
+
+    px = points[:, 0]
+    py = points[:, 1]
+    inside = (np.abs(px) <= half_width) & (np.abs(py) <= half_length)
+    if int(inside.sum()) < min_points:
+        return points, False
+
+    dists = np.stack(
+        [
+            half_width - px,
+            half_width + px,
+            half_length - py,
+            half_length + py,
+        ],
+        axis=1,
+    )
+    nearest = np.argmin(dists, axis=1)
+    # Right, left, front, back. Outward is away from the interior.
+    outward = np.array([[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]])[nearest]
+    # World points move opposite the body twist.
+    v_rel_x = -twist.vx_mps + twist.wz_rad_s * py
+    v_rel_y = -twist.vy_mps - twist.wz_rad_s * px
+    leaving = inside & (outward[:, 0] * v_rel_x + outward[:, 1] * v_rel_y > 1e-3)
+    if int((inside & ~leaving).sum()) >= min_points:
+        return points, True
+    return points[~leaving], False
+
+
 def regulate(twist: Twist, points: np.ndarray, cfg: GuardConfig) -> GuardResult:
     """Scale ``twist`` from the obstacles in the base frame."""
     points = np.asarray(points, dtype=float)
@@ -111,10 +161,10 @@ def regulate(twist: Twist, points: np.ndarray, cfg: GuardConfig) -> GuardResult:
     half_length = cfg.length_m / 2.0 + cfg.padding_m
     half_width = cfg.width_m / 2.0 + cfg.padding_m
     min_points = max(1, int(cfg.min_points))
-    here = _counts_inside(
-        np.zeros(1), np.zeros(1), np.zeros(1), points, half_width, half_length
+    points, pressing = _without_departing_contact(
+        twist, points, half_width, half_length, min_points
     )
-    if int(here[0]) >= min_points:
+    if pressing:
         return _result(twist, 0.0, 0.0)
 
     speed = twist.planar_speed

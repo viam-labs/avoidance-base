@@ -2,7 +2,7 @@
 
 Wraps a Viam base and slows or stops it when camera point clouds show an obstacle.
 
-The module provides one model, `viam-labs:base:avoidance` (`rdk:component:base`). It forwards base commands to an underlying base. `SetVelocity` and `SetPower` are latched and rechecked against the latest clouds. `MoveStraight` and `Spin` run as velocity loops so the same limit applies while they are in progress. The module does not steer around obstacles: it keeps the commanded curvature, reduces speed so the robot stays about `time_to_collision_s` from a hit, and zeroes the command when the body is already inside the stop gap.
+The module provides one model, `viam-labs:base:avoidance` (`rdk:component:base`). It forwards base commands to an underlying base. `SetVelocity` and `SetPower` are latched and rechecked against the latest clouds. `MoveStraight` and `Spin` run as velocity loops so the same limit applies while they are in progress. The module does not steer around obstacles: it keeps the commanded curvature and reduces speed so the robot stays about `time_to_collision_s` from a hit. A command that would move further into an obstacle already inside the stop gap is zeroed. A command that moves away, such as backing up from a wall ahead, is allowed.
 
 Point clouds come from any camera that implements `GetPointCloud` (lidar, depth camera, ultrasonic models that publish a cloud, and so on). Each cloud is transformed into the underlying base frame with the machine frame system. A camera is ignored, and driving stays stopped, until that camera's frame parents to the configured base. A camera parented to `world` does not count.
 

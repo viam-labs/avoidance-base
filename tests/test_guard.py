@@ -66,6 +66,33 @@ def test_unresolved_frames_stop():
     assert result.action == "stop"
 
 
+def test_contact_ahead_blocks_forward_and_allows_reverse():
+    cfg = _cfg()
+    ahead = np.array([[0.0, 0.32]])
+    forward = regulate(Twist(vy_mps=0.4), ahead, cfg)
+    assert forward.action == "stop"
+    assert forward.twist.vy_mps == 0.0
+
+    reverse = regulate(Twist(vy_mps=-0.4), ahead, cfg)
+    assert reverse.action == "clear"
+    assert math.isclose(reverse.twist.vy_mps, -0.4)
+
+
+def test_front_wall_blocks_strafe_and_still_allows_reverse():
+    cfg = _cfg(min_points=3)
+    xs = np.linspace(-1.0, 1.0, 11)
+    wall = np.stack([xs, np.full(xs.shape, 0.32)], axis=1)
+    assert regulate(Twist(vx_mps=0.4), wall, cfg).action == "stop"
+    reverse = regulate(Twist(vy_mps=-0.4), wall, cfg)
+    assert reverse.action == "clear"
+    assert math.isclose(reverse.twist.vy_mps, -0.4)
+
+
+def test_contact_on_both_ends_blocks_reverse_too():
+    both = np.array([[0.0, 0.32], [0.0, -0.32]])
+    assert regulate(Twist(vy_mps=-0.4), both, _cfg()).action == "stop"
+
+
 def test_clear_path_keeps_the_command_and_curvature():
     result = regulate(Twist(vy_mps=0.3, wz_rad_s=0.2), np.array([[2.0, 0.0]]), _cfg())
     assert result.action == "clear"
