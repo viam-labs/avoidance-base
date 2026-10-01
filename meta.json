@@ -1,0 +1,18 @@
+{
+  "$schema": "https://dl.viam.dev/module.schema.json",
+  "module_id": "viam-labs:avoidance-base",
+  "visibility": "public",
+  "url": "https://github.com/viam-labs/avoidance-base",
+  "description": "Base wrapper that slows or stops for obstacles seen in camera point clouds.",
+  "models": [
+    {
+      "api": "rdk:component:base",
+      "model": "viam-labs:base:avoidance",
+      "short_description": "Passes base commands through, slowing or stopping for point-cloud obstacles.",
+      "markdown_link": "README.md"
+    }
+  ],
+  "entrypoint": "run.sh",
+  "first_run": "setup.sh",
+  "markdown_link": "README.md"
+}

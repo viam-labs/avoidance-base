@@ -1,0 +1,3 @@
+# Python dependencies for the avoidance-base module.
+viam-sdk>=0.30.0
+numpy>=1.24
