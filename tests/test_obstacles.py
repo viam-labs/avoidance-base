@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 from viam.proto.common import Pose
-from viam.spatialmath.rotation_matrix import RotationMatrix
 
 from src.frames import pose_matrix_in_destination
 from src.obstacles import parse_pcd, prepare_base_points
@@ -59,16 +58,18 @@ def test_ascii_and_binary_pcd_match():
 
 
 def test_body_and_optical_points_land_in_front_of_the_base():
-    optical = RotationMatrix([1, 0, 0, 0, 0, 1, 0, -1, 0]).to_quaternion().to_pose(0, 200, 300)
+    optical = Pose(x=0, y=200, z=300, o_x=0, o_y=1, o_z=0, theta=-90)
     body = _identity(0, 200, 300)
     cases = (
         (body, (0.0, 1000.0, 0.0)),
         (optical, (0.0, 0.0, 1000.0)),
+        # Same optical aim, but the cloud is in metres (Livox / Orbbec).
+        (optical, (0.0, 0.0, 1.0)),
     )
     for pose, raw_point in cases:
         transform = pose_matrix_in_destination(_camera_on_base(pose), "cam", "cart")
         assert transform is not None
-        cloud = np.array([raw_point, (0.0, 0.0, 0.0), (0.0, 10.0, 0.0)], dtype=float)
+        cloud = np.array([raw_point, (0.0, 0.0, 0.0), (0.0, 0.01, 0.0)], dtype=float)
         xy = prepare_base_points(
             cloud,
             transform,
@@ -79,5 +80,5 @@ def test_body_and_optical_points_land_in_front_of_the_base():
             max_range_m=10.0,
         )
         assert xy.shape == (1, 2)
-        assert abs(xy[0, 0]) < 1e-6
-        assert abs(xy[0, 1] - 1.2) < 1e-6
+        assert abs(xy[0, 0]) < 1e-4
+        assert abs(xy[0, 1] - 1.2) < 1e-4

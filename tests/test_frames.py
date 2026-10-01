@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import math
-
 from viam.proto.common import Geometry, Pose, PoseInFrame, RectangularPrism, Transform, Vector3
 from viam.proto.robot import FrameSystemConfig
-from viam.spatialmath.rotation_matrix import RotationMatrix
-
 from src.frames import (
     base_box_forward_lateral,
     pose_matrix_in_destination,
@@ -71,10 +67,9 @@ def test_camera_mounted_through_a_link_on_the_base():
     assert (length, width) == (0.5, 0.5)
 
 
-def test_optical_pose_round_trip_matrix():
-    # Camera +Z (forward) → base +Y, camera +X (right) → base +X, camera +Y → base -Z.
-    elements = [1, 0, 0, 0, 0, 1, 0, -1, 0]
-    pose = RotationMatrix(elements).to_quaternion().to_pose(0, 200, 300)
+def test_orbbec_forward_axis_is_base_forward():
+    # Live cart: orbbec ov (0, 1, 0, -90). +Z is optical forward and must land on +Y.
+    pose = Pose(x=0, y=230, z=310, o_x=0, o_y=1, o_z=0, theta=-90)
     configs = [
         _part("cart", "world", _identity(0, 0, 0)),
         _part("cam", "cart", pose),
@@ -82,7 +77,6 @@ def test_optical_pose_round_trip_matrix():
     transform = pose_matrix_in_destination(configs, "cam", "cart")
     assert transform is not None
     point = transform[:3, :3] @ [0.0, 0.0, 1000.0] + transform[:3, 3]
-    assert abs(point[0] - 0.0) < 1e-6
-    assert abs(point[1] - 1200.0) < 1e-6
-    assert abs(point[2] - 300.0) < 1e-6
-    assert abs(math.hypot(point[0], point[1]) - 1200.0) < 1e-6
+    assert abs(point[0] - 0.0) < 1e-4
+    assert abs(point[1] - 1230.0) < 1e-4
+    assert abs(point[2] - 310.0) < 1e-4

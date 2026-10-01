@@ -9,7 +9,7 @@ import numpy as np
 
 
 def parse_pcd(raw: bytes) -> np.ndarray:
-    """Parse a Viam PCD into ``(N, 3)`` XYZ in the file's units (millimetres).
+    """Parse a Viam PCD into ``(N, 3)`` XYZ in the file's units.
 
     Supports ASCII and uncompressed little-endian binary clouds with x/y/z.
     Extra fields are ignored.
@@ -91,6 +91,24 @@ def parse_pcd(raw: bytes) -> np.ndarray:
     return np.stack([structured["x"], structured["y"], structured["z"]], axis=1).astype(float)
 
 
+def cloud_to_millimetres(points: np.ndarray) -> np.ndarray:
+    """Return ``points`` in millimetres.
+
+    The camera API describes PCD coordinates as millimetres, but lidar and
+    depth modules on a robot (Livox, Orbbec, and similar) write metres. A
+    cloud whose nonzero radii sit under 100 is metres; a millimetre cloud of
+    a real scene is hundreds to thousands.
+    """
+    points = np.asarray(points, dtype=float)
+    if points.size == 0:
+        return points
+    radii = np.linalg.norm(points[:, :3], axis=1)
+    radii = radii[np.isfinite(radii) & (radii > 1e-6)]
+    if radii.size == 0 or float(np.median(radii)) >= 100.0:
+        return points
+    return points * 1000.0
+
+
 def _downsample(points: np.ndarray, max_points: int) -> np.ndarray:
     if max_points <= 0 or len(points) <= max_points:
         return points
@@ -99,7 +117,7 @@ def _downsample(points: np.ndarray, max_points: int) -> np.ndarray:
 
 
 def prepare_base_points(
-    points_mm: np.ndarray,
+    points: np.ndarray,
     base_t_camera_mm: np.ndarray,
     *,
     z_min_m: float,
@@ -112,13 +130,14 @@ def prepare_base_points(
     """Return ``(N, 2)`` obstacle XY in the base frame, metres.
 
     ``base_t_camera_mm`` is the camera pose in the base (+Y forward, +X right).
-    Invalid and ``(0, 0, 0)`` pixels are dropped. Points inside the unpadded
-    footprint are dropped so the chassis does not count as an obstacle.
+    Coordinates may be millimetres or metres; metres are detected from the
+    cloud's scale. Invalid and ``(0, 0, 0)`` pixels are dropped. Points inside
+    the unpadded footprint are dropped so the chassis does not count as an obstacle.
     """
-    points = np.asarray(points_mm, dtype=float)
+    points = np.asarray(points, dtype=float)
     if points.ndim != 2 or points.shape[1] < 3 or points.size == 0:
         return np.empty((0, 2))
-    points = points[:, :3]
+    points = cloud_to_millimetres(points[:, :3])
     keep = np.isfinite(points).all(axis=1) & np.any(points != 0.0, axis=1)
     points = points[keep]
     if points.size == 0:

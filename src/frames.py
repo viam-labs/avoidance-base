@@ -29,9 +29,12 @@ def _pose_to_matrix(pose) -> np.ndarray:
             theta=float(pose.theta),
         )
     )
+    # The spatialmath buffer is column-major. Reading it row-major sends an
+    # orientation-vector +Z of +Y (o_y=1) to base -Y, so a forward depth cloud
+    # is painted behind the robot.
     rotation = np.asarray(ov.to_quaternion().to_rotation_matrix().elements, dtype=float)
     transform = np.eye(4, dtype=float)
-    transform[:3, :3] = rotation.reshape(3, 3)
+    transform[:3, :3] = rotation.reshape((3, 3), order="F")
     transform[0, 3] = float(pose.x)
     transform[1, 3] = float(pose.y)
     transform[2, 3] = float(pose.z)
