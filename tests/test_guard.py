@@ -78,14 +78,18 @@ def test_contact_ahead_blocks_forward_and_allows_reverse():
     assert math.isclose(reverse.twist.vy_mps, -0.4)
 
 
-def test_front_wall_blocks_strafe_and_still_allows_reverse():
+def test_front_wall_blocks_approach_and_allows_reverse_or_strafe():
     cfg = _cfg(min_points=3)
+    # Corners included: a 360 scan of a wall ahead is not only on the centerline.
     xs = np.linspace(-1.0, 1.0, 11)
     wall = np.stack([xs, np.full(xs.shape, 0.32)], axis=1)
-    assert regulate(Twist(vx_mps=0.4), wall, cfg).action == "stop"
+    assert regulate(Twist(vy_mps=0.4), wall, cfg).action == "stop"
     reverse = regulate(Twist(vy_mps=-0.4), wall, cfg)
     assert reverse.action == "clear"
     assert math.isclose(reverse.twist.vy_mps, -0.4)
+    strafe = regulate(Twist(vx_mps=0.4), wall, cfg)
+    assert strafe.action == "clear"
+    assert math.isclose(strafe.twist.vx_mps, 0.4)
 
 
 def test_contact_on_both_ends_blocks_reverse_too():

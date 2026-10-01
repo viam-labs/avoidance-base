@@ -3,12 +3,16 @@
 The body sits at the origin: +Y is forward, +X is right, +yaw is CCW.
 Commanded planar speed is scaled so the padded footprint stays
 ``time_to_collision_s`` from the next hit, and is zeroed when the remaining
-distance is inside ``stop_gap_m``. A command that is already in contact is
-zeroed only when it does not drive out of that contact, so backing away from
-a wall ahead still works. Curvature is preserved by scaling yaw with the same
-ratio. This matches Nav2's collision-monitor approach model and nav-stack's
-``v = (free - stop_gap) / time_to_collision`` law. It does not steer around
-obstacles.
+distance is inside ``stop_gap_m``. Curvature is preserved by scaling yaw with
+the same ratio.
+
+This follows Nav2's collision monitor. The approach model only slows the
+commanded velocity, so a wall ahead does not apply to a reverse command.
+Points already inside the padding, the same case as a velocity polygon that
+has already tripped, may be moved away from or passed alongside: a step is a
+hit only when it brings the body closer than that point's current clearance
+(Nav2 does not keep a surround zone active for every direction at once). It
+does not steer around obstacles.
 """
 
 from __future__ import annotations
@@ -40,6 +44,11 @@ class GuardConfig:
     length_m: float
     width_m: float
     padding_m: float = 0.05
+    # Obstacles already inside the padding may be left or passed alongside,
+    # but a step may not come within ``min_gap_m`` or close by more than
+    # ``near_slack_m``. Same rule as the Nav2 footprint approach check.
+    min_gap_m: float = 0.02
+    near_slack_m: float = 0.01
     stop_gap_m: float = 0.04
     time_to_collision_s: float = 1.2
     min_points: int = 3
@@ -102,52 +111,75 @@ def _result(twist: Twist, scale: float, free_m: float) -> GuardResult:
     return GuardResult(twist.scaled(scale), _action_for(scale), free_m)
 
 
-def _without_departing_contact(
-    twist: Twist,
+def _body_clearance(
+    points: np.ndarray, half_width: float, half_length: float
+) -> np.ndarray:
+    """Distance outside the body rectangle. Zero when a point is inside it."""
+    if points.size == 0:
+        return np.empty(0)
+    lateral = np.maximum(np.abs(points[:, 0]) - half_width, 0.0)
+    forward = np.maximum(np.abs(points[:, 1]) - half_length, 0.0)
+    return np.hypot(lateral, forward)
+
+
+def _clearance_along(
+    xs: np.ndarray,
+    ys: np.ndarray,
+    thetas: np.ndarray,
     points: np.ndarray,
     half_width: float,
     half_length: float,
-    min_points: int,
-) -> tuple[np.ndarray, bool]:
-    """Drop padding points this command moves outward, or refuse the command.
+) -> np.ndarray:
+    """``(K, N)`` body-rectangle clearance of each point at each pose."""
+    if points.size == 0:
+        return np.zeros((len(xs), 0))
+    dx = points[None, :, 0] - xs[:, None]
+    dy = points[None, :, 1] - ys[:, None]
+    cos_t = np.cos(thetas)[:, None]
+    sin_t = np.sin(thetas)[:, None]
+    right = cos_t * dx + sin_t * dy
+    forward = -sin_t * dx + cos_t * dy
+    lateral = np.maximum(np.abs(right) - half_width, 0.0)
+    ahead = np.maximum(np.abs(forward) - half_length, 0.0)
+    return np.hypot(lateral, ahead)
 
-    The second value is true when points already inside the padded footprint
-    are not being left, so the command would keep pressing into them.
+
+def _hit_counts(
+    xs: np.ndarray,
+    ys: np.ndarray,
+    thetas: np.ndarray,
+    points: np.ndarray,
+    cfg: GuardConfig,
+    half_width: float,
+    half_length: float,
+) -> np.ndarray:
+    """Points that enter the padding, or near points the step moves closer to.
+
+    ``half_width`` and ``half_length`` are the unpadded body. Points already
+    inside the padding keep a clearance floor and only count when a pose drops
+    below it, so backing away from a wall is not itself a collision.
     """
-    stopped = twist.planar_speed < 1e-4 and abs(twist.wz_rad_s) < 1e-4
-    if points.size == 0 or stopped:
-        inside = (
-            (np.abs(points[:, 0]) <= half_width) & (np.abs(points[:, 1]) <= half_length)
-            if points.size
-            else np.zeros(0, dtype=bool)
+    counts = np.zeros(len(xs), dtype=int)
+    if points.size == 0:
+        return counts
+    clearance = _body_clearance(points, half_width, half_length)
+    near = clearance <= cfg.padding_m
+    far = points[~near]
+    near_points = points[near]
+    if far.size:
+        counts += _counts_inside(
+            xs,
+            ys,
+            thetas,
+            far,
+            half_width + cfg.padding_m,
+            half_length + cfg.padding_m,
         )
-        return points, int(inside.sum()) >= min_points
-
-    px = points[:, 0]
-    py = points[:, 1]
-    inside = (np.abs(px) <= half_width) & (np.abs(py) <= half_length)
-    if int(inside.sum()) < min_points:
-        return points, False
-
-    dists = np.stack(
-        [
-            half_width - px,
-            half_width + px,
-            half_length - py,
-            half_length + py,
-        ],
-        axis=1,
-    )
-    nearest = np.argmin(dists, axis=1)
-    # Right, left, front, back. Outward is away from the interior.
-    outward = np.array([[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]])[nearest]
-    # World points move opposite the body twist.
-    v_rel_x = -twist.vx_mps + twist.wz_rad_s * py
-    v_rel_y = -twist.vy_mps - twist.wz_rad_s * px
-    leaving = inside & (outward[:, 0] * v_rel_x + outward[:, 1] * v_rel_y > 1e-3)
-    if int((inside & ~leaving).sum()) >= min_points:
-        return points, True
-    return points[~leaving], False
+    if near_points.size:
+        floor = np.maximum(cfg.min_gap_m, clearance[near] - cfg.near_slack_m)
+        distance = _clearance_along(xs, ys, thetas, near_points, half_width, half_length)
+        counts += (distance < floor[None, :]).sum(axis=1)
+    return counts
 
 
 def regulate(twist: Twist, points: np.ndarray, cfg: GuardConfig) -> GuardResult:
@@ -158,15 +190,9 @@ def regulate(twist: Twist, points: np.ndarray, cfg: GuardConfig) -> GuardResult:
     else:
         points = points.reshape(-1, 2)
 
-    half_length = cfg.length_m / 2.0 + cfg.padding_m
-    half_width = cfg.width_m / 2.0 + cfg.padding_m
+    half_length = cfg.length_m / 2.0
+    half_width = cfg.width_m / 2.0
     min_points = max(1, int(cfg.min_points))
-    points, pressing = _without_departing_contact(
-        twist, points, half_width, half_length, min_points
-    )
-    if pressing:
-        return _result(twist, 0.0, 0.0)
-
     speed = twist.planar_speed
     yaw = abs(twist.wz_rad_s)
     if speed < 1e-4 and yaw < 1e-4:
@@ -194,7 +220,7 @@ def _regulate_arc(
     steps = max(1, min(steps, 400))
     times = (np.arange(steps) + 1) * dt
     xs, ys, thetas = _poses_along(twist, times)
-    counts = _counts_inside(xs, ys, thetas, points, half_width, half_length)
+    counts = _hit_counts(xs, ys, thetas, points, cfg, half_width, half_length)
     hits = np.flatnonzero(counts >= min_points)
     if hits.size == 0:
         return _result(twist, 1.0, math.inf)
@@ -221,8 +247,8 @@ def _regulate_spin(
     steps = max(1, min(int(math.ceil(horizon / step)), 400))
     angles = (np.arange(steps) + 1) * step
     signed = math.copysign(1.0, twist.wz_rad_s) * angles
-    counts = _counts_inside(
-        np.zeros(steps), np.zeros(steps), signed, points, half_width, half_length
+    counts = _hit_counts(
+        np.zeros(steps), np.zeros(steps), signed, points, cfg, half_width, half_length
     )
     hits = np.flatnonzero(counts >= min_points)
     if hits.size == 0:
