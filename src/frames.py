@@ -29,12 +29,24 @@ def _pose_to_matrix(pose) -> np.ndarray:
             theta=float(pose.theta),
         )
     )
-    # The spatialmath buffer is column-major. Reading it row-major sends an
-    # orientation-vector +Z of +Y (o_y=1) to base -Y, so a forward depth cloud
-    # is painted behind the robot.
-    rotation = np.asarray(ov.to_quaternion().to_rotation_matrix().elements, dtype=float)
+    # ``elements`` is a 9-vector whose row/column order depends on the
+    # installed viam-sdk. The orientation vector itself is the child's +Z
+    # axis, so pick the layout that sends +Z there. The other one mirrors a
+    # forward depth cloud behind the robot and a reverse command hits it.
+    elements = np.asarray(ov.to_quaternion().to_rotation_matrix().elements, dtype=float)
+    candidates = (
+        elements.reshape((3, 3), order="C"),
+        elements.reshape((3, 3), order="F"),
+    )
+    z_axis = np.array([float(pose.o_x), float(pose.o_y), float(pose.o_z)], dtype=float)
+    norm = float(np.linalg.norm(z_axis))
+    if norm < 1e-9:
+        rotation = candidates[1]
+    else:
+        z_axis /= norm
+        rotation = max(candidates, key=lambda matrix: float(matrix[:, 2] @ z_axis))
     transform = np.eye(4, dtype=float)
-    transform[:3, :3] = rotation.reshape((3, 3), order="F")
+    transform[:3, :3] = rotation
     transform[0, 3] = float(pose.x)
     transform[1, 3] = float(pose.y)
     transform[2, 3] = float(pose.z)
