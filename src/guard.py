@@ -50,7 +50,7 @@ class GuardConfig:
     min_gap_m: float = 0.02
     near_slack_m: float = 0.01
     stop_gap_m: float = 0.04
-    time_to_collision_s: float = 1.2
+    time_to_collision_s: float = 2.0
     min_points: int = 3
     step_m: float = 0.025
     rot_step_rad: float = 0.04

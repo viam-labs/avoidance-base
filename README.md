@@ -41,7 +41,7 @@ Optional attributes:
 
 | Attribute | Default | Meaning |
 | --- | --- | --- |
-| `time_to_collision_s` | `1.2` | Slow so this many seconds remain before the padded body hits |
+| `time_to_collision_s` | `2.0` | Slow so this many seconds remain before the padded body hits |
 | `stop_gap_m` | `0.04` | Zero the command when the free distance is inside this gap |
 | `padding_m` | `0.05` | Extra keep-out around the footprint |
 | `min_points` | `3` | Ignore clusters smaller than this |

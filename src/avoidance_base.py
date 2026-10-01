@@ -37,7 +37,7 @@ from .runtime import get_parent_robot
 
 LOGGER = getLogger(__name__)
 
-DEFAULT_TIME_TO_COLLISION_S = 1.2
+DEFAULT_TIME_TO_COLLISION_S = 2.0
 DEFAULT_STOP_GAP_M = 0.04
 DEFAULT_PADDING_M = 0.05
 DEFAULT_MIN_POINTS = 3
