@@ -393,18 +393,35 @@ class AvoidanceBase(Base):
     def _status(self) -> Dict[str, Any]:
         now = time.monotonic()
         cameras: Dict[str, Any] = {}
+        half_length = self._guard.length_m / 2.0
         for name in self._camera_names:
             cached = self._clouds.get(name)
-            cameras[name] = {
+            points = None if cached is None else cached[1]
+            info: Dict[str, Any] = {
                 "age_s": None if cached is None else now - cached[0],
-                "points": 0 if cached is None else int(len(cached[1])),
+                "points": 0 if points is None else int(len(points)),
             }
+            pose = self._poses_mm.get(name)
+            if pose is not None:
+                info["forward_y"] = float(pose[1, 2])
+                info["origin_y_mm"] = float(pose[1, 3])
+            if points is not None and len(points):
+                ahead = points[:, 1]
+                info["y_min"] = float(np.min(ahead))
+                info["y_max"] = float(np.max(ahead))
+                info["y_p50"] = float(np.median(ahead))
+                info["behind"] = int(np.sum(ahead < -half_length))
+            cameras[name] = info
         free = self._last_result.free_m
         return {
             "action": self._last_result.action,
             "free_m": None if not math.isfinite(free) else free,
             "frames_ok": self._frames_ok,
             "frame_error": self._frame_error,
+            "footprint_m": {
+                "length": self._guard.length_m,
+                "width": self._guard.width_m,
+            },
             "cameras": cameras,
             "linear_mm_s": {
                 "x": self._last_result.twist.vx_mps * 1000.0,
