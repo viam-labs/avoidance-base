@@ -154,8 +154,30 @@ def resolve_footprint(
     return length, width
 
 
+async def abandon_after(awaitable, timeout_s: float):
+    """Await ``awaitable``, and stop waiting after ``timeout_s``.
+
+    ``asyncio.wait_for`` stays stuck when the cancelled call never finishes.
+    A camera or frame RPC in that state used to freeze cloud refresh, and
+    every drive command then stayed at zero until the module process restarted.
+    """
+    task = asyncio.ensure_future(awaitable)
+    _done, _pending = await asyncio.wait({task}, timeout=timeout_s)
+
+    def _discard(done: asyncio.Task) -> None:
+        if not done.cancelled():
+            done.exception()
+
+    if task not in _done:
+        task.add_done_callback(_discard)
+        task.cancel()
+        raise TimeoutError(f"timed out after {timeout_s:.1f}s")
+    return task.result()
+
+
 async def fetch_frame_system_config(
     robot, *, timeout_s: float = FRAME_SYSTEM_TIMEOUT_S
 ) -> list[Any]:
     """``robot.get_frame_system_config()`` on the caller's event loop."""
-    return list(await asyncio.wait_for(robot.get_frame_system_config(), timeout=timeout_s))
+    configs = await abandon_after(robot.get_frame_system_config(), timeout_s)
+    return list(configs)

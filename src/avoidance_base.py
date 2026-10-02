@@ -26,6 +26,7 @@ from viam.resource.types import Model, ModelFamily
 from viam.utils import ValueTypes, struct_to_dict
 
 from .frames import (
+    abandon_after,
     base_box_forward_lateral,
     fetch_frame_system_config,
     pose_matrix_in_destination,
@@ -48,6 +49,8 @@ DEFAULT_Z_MIN_M = 0.05
 DEFAULT_Z_MAX_M = 2.0
 DEFAULT_ROBOT_RADIUS_M = 0.25
 DEFAULT_ASSUMED_MAX_LINEAR_MPS = 0.5
+CLOUD_RPC_TIMEOUT_S = 2.0
+CHILD_RPC_TIMEOUT_S = 1.0
 DEFAULT_ASSUMED_MAX_ANGULAR_DPS = 90.0
 MAX_CLOUD_POINTS = 8000
 
@@ -89,7 +92,10 @@ class AvoidanceBase(Base):
         self._gen = 0
         self._tasks: list[asyncio.Task] = []
         self._write_lock: Optional[asyncio.Lock] = None
+        self._writing = False
+        self._write_id = 0
         self._last_key: Optional[Tuple[float, float, float]] = None
+        self._block_reason = ""
         self._last_result = GuardResult(Twist(), "stop", 0.0)
         self._closed = False
 
@@ -141,6 +147,8 @@ class AvoidanceBase(Base):
         self._mode = "idle"
         self._latch = Twist()
         self._last_key = None
+        self._writing = False
+        self._write_id += 1
         self._clouds = {}
         self._poses_mm = {}
         self._frames_ok = False
@@ -196,9 +204,28 @@ class AvoidanceBase(Base):
             return
         gen = self._gen
         self._tasks = [
-            loop.create_task(self._image_loop(gen), name=f"{self.name}-images"),
-            loop.create_task(self._control_loop(gen), name=f"{self.name}-control"),
+            self._start_loop(loop, "images", gen),
+            self._start_loop(loop, "control", gen),
         ]
+
+    def _start_loop(self, loop: asyncio.AbstractEventLoop, which: str, gen: int) -> asyncio.Task:
+        body = self._image_loop(gen) if which == "images" else self._control_loop(gen)
+        task = loop.create_task(body, name=f"{self.name}-{which}")
+
+        def _done(done: asyncio.Task) -> None:
+            if self._closed or gen != self._gen or done.cancelled():
+                return
+            exc = done.exception()
+            LOGGER.error("avoidance %r %s loop exited (%s); restarting", self.name, which, exc)
+            try:
+                restarted = self._start_loop(asyncio.get_running_loop(), which, gen)
+            except RuntimeError:
+                return
+            self._tasks = [item for item in self._tasks if item is not done]
+            self._tasks.append(restarted)
+
+        task.add_done_callback(_done)
+        return task
 
     async def close(self) -> None:
         if self._closed:
@@ -303,7 +330,18 @@ class AvoidanceBase(Base):
             pose = self._poses_mm.get(name)
             if camera is None or pose is None:
                 return
-            data = await camera.get_point_cloud(timeout=2.0)
+            try:
+                data = await abandon_after(
+                    camera.get_point_cloud(timeout=CLOUD_RPC_TIMEOUT_S),
+                    CLOUD_RPC_TIMEOUT_S,
+                )
+            except TimeoutError:
+                LOGGER.warning(
+                    "avoidance %r camera %r point cloud timed out; retrying",
+                    self.name,
+                    name,
+                )
+                return
             raw = data[0] if isinstance(data, tuple) else data
             loop = asyncio.get_running_loop()
             length = self._guard.length_m
@@ -362,33 +400,77 @@ class AvoidanceBase(Base):
 
     def _evaluate(self, twist: Twist) -> GuardResult:
         points, stale = self._observation()
+        if stale or not self._frames_ok:
+            reason = self._frame_error or self._stale_reason()
+            if reason != self._block_reason:
+                LOGGER.warning("avoidance %r holding motion: %s", self.name, reason)
+                self._block_reason = reason
+        elif self._block_reason:
+            self._block_reason = ""
         result = decide(twist, points, self._guard, frames_ok=self._frames_ok, stale=stale)
         self._last_result = result
         return result
 
+    def _stale_reason(self) -> str:
+        now = time.monotonic()
+        stale = []
+        for name in self._camera_names:
+            cached = self._clouds.get(name)
+            if cached is None:
+                stale.append(f"{name} has no cloud")
+            elif now - cached[0] > self._source_timeout_s:
+                stale.append(f"{name} cloud is {now - cached[0]:.1f}s old")
+        return "camera cloud stale: " + ", ".join(stale) if stale else "camera cloud stale"
+
     async def _publish(self, result: GuardResult, *, mode_expected: str) -> None:
         async with self._lock():
-            if self._mode != mode_expected or self._child is None:
+            if self._mode != mode_expected or self._child is None or self._writing:
                 return
-            await self._write_child(result)
+            key = _twist_key(result)
+            if key == self._last_key:
+                return
+            self._last_key = key
+            self._write_id += 1
+            write_id = self._write_id
+            self._writing = True
+            child = self._child
+        try:
+            await self._send_child(child, result)
+        finally:
+            async with self._lock():
+                if self._write_id == write_id:
+                    self._writing = False
+                superseded = self._mode != mode_expected
+        if superseded:
+            try:
+                await abandon_after(child.stop(), CHILD_RPC_TIMEOUT_S)
+            except TimeoutError:
+                LOGGER.warning("avoidance %r underlying base stop timed out", self.name)
 
-    async def _write_child(self, result: GuardResult) -> None:
-        key = (
-            round(result.twist.vx_mps, 4),
-            round(result.twist.vy_mps, 4),
-            round(result.twist.wz_rad_s, 4),
-        )
-        if key == self._last_key:
-            return
-        self._last_key = key
-        assert self._child is not None
-        if key == (0.0, 0.0, 0.0):
-            await self._child.stop()
-            return
-        await self._child.set_velocity(
-            Vector3(x=result.twist.vx_mps * 1000.0, y=result.twist.vy_mps * 1000.0, z=0.0),
-            Vector3(x=0.0, y=0.0, z=math.degrees(result.twist.wz_rad_s)),
-        )
+    async def _send_child(self, child: Base, result: GuardResult) -> None:
+        key = _twist_key(result)
+        try:
+            if key == (0.0, 0.0, 0.0):
+                await abandon_after(child.stop(), CHILD_RPC_TIMEOUT_S)
+            else:
+                await abandon_after(
+                    child.set_velocity(
+                        Vector3(x=result.twist.vx_mps * 1000.0, y=result.twist.vy_mps * 1000.0, z=0.0),
+                        Vector3(x=0.0, y=0.0, z=math.degrees(result.twist.wz_rad_s)),
+                    ),
+                    CHILD_RPC_TIMEOUT_S,
+                )
+        except TimeoutError:
+            LOGGER.warning("avoidance %r underlying base command timed out; will retry", self.name)
+            async with self._lock():
+                if self._last_key == key:
+                    self._last_key = None
+        except Exception:
+            LOGGER.warning("avoidance %r underlying base command failed; will retry", self.name)
+            async with self._lock():
+                if self._last_key == key:
+                    self._last_key = None
+            raise
 
     def _status(self) -> Dict[str, Any]:
         now = time.monotonic()
@@ -487,10 +569,16 @@ class AvoidanceBase(Base):
         self._latch = Twist()
         self._mode = "idle"
         self._last_result = GuardResult(Twist(), "stop", self._last_result.free_m)
+        child = self._child
         async with self._lock():
             self._last_key = (0.0, 0.0, 0.0)
-            if self._child is not None:
-                await self._child.stop()
+        if child is not None:
+            try:
+                await abandon_after(child.stop(), CHILD_RPC_TIMEOUT_S)
+            except TimeoutError:
+                LOGGER.warning("avoidance %r underlying base stop timed out", self.name)
+                async with self._lock():
+                    self._last_key = None
 
     async def move_straight(
         self,
@@ -570,9 +658,27 @@ class AvoidanceBase(Base):
                         f"{what} stopped with {remaining:.3f} remaining: obstacle inside stopping distance"
                     )
                 async with self._lock():
-                    if self._motion_token is not token or self._mode != "trajectory":
+                    if self._motion_token is not token or self._mode != "trajectory" or self._writing:
                         return
-                    await self._write_child(result)
+                    key = _twist_key(result)
+                    if key == self._last_key:
+                        return
+                    self._last_key = key
+                    self._write_id += 1
+                    write_id = self._write_id
+                    self._writing = True
+                    child = self._child
+                if child is None:
+                    async with self._lock():
+                        if self._write_id == write_id:
+                            self._writing = False
+                    return
+                try:
+                    await self._send_child(child, result)
+                finally:
+                    async with self._lock():
+                        if self._write_id == write_id:
+                            self._writing = False
                 step = min(period, remaining / max(speed, 1e-6))
                 await asyncio.sleep(step)
                 traveled = (
@@ -584,10 +690,14 @@ class AvoidanceBase(Base):
                 self._motion_token = None
                 self._mode = "idle"
                 self._latch = Twist()
+                child = self._child
                 async with self._lock():
                     self._last_key = (0.0, 0.0, 0.0)
-                    if self._child is not None:
-                        await self._child.stop()
+                if child is not None:
+                    try:
+                        await abandon_after(child.stop(), CHILD_RPC_TIMEOUT_S)
+                    except TimeoutError:
+                        LOGGER.warning("avoidance %r underlying base stop timed out", self.name)
 
     async def is_moving(self) -> bool:
         if self._mode == "trajectory":
@@ -631,6 +741,14 @@ class AvoidanceBase(Base):
         if self._child is None:
             raise RuntimeError(f"avoidance base {self.name!r} has no underlying base")
         return await self._child.do_command(command, timeout=timeout, **kwargs)
+
+
+def _twist_key(result: GuardResult) -> Tuple[float, float, float]:
+    return (
+        round(result.twist.vx_mps, 4),
+        round(result.twist.vy_mps, 4),
+        round(result.twist.wz_rad_s, 4),
+    )
 
 
 def _float(attrs: Mapping[str, Any], key: str, default: float) -> float:

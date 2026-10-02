@@ -105,6 +105,63 @@ def test_move_straight_raises_when_the_obstacle_is_inside_the_stop_zone():
     asyncio.run(_run())
 
 
+def test_a_stuck_child_command_does_not_hold_the_lock():
+    async def _run() -> None:
+        base, child = _ready(np.empty((0, 2)))
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _set_velocity(linear, angular, **kwargs):
+            del linear, angular, kwargs
+            started.set()
+            await release.wait()
+
+        child.set_velocity = _set_velocity  # type: ignore[method-assign]
+        command = asyncio.create_task(
+            base.set_velocity(Vector3(x=0, y=200, z=0), Vector3(x=0, y=0, z=0))
+        )
+        await started.wait()
+        await asyncio.wait_for(base.stop(), timeout=0.5)
+        assert child.stopped >= 1
+        release.set()
+        await command
+
+    asyncio.run(_run())
+
+
+def test_a_stuck_point_cloud_does_not_stall_the_next_refresh():
+    async def _run() -> None:
+        base, _child = _ready(np.empty((0, 2)))
+        calls = {"n": 0}
+
+        class _Camera:
+            async def get_point_cloud(self, timeout=None):
+                del timeout
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    await asyncio.Event().wait()
+                return b"", "pointcloud/pcd"
+
+        base._cameras = {"cam": _Camera()}  # type: ignore[assignment]
+        base._poses_mm = {"cam": np.eye(4)}
+        base._clouds = {}
+        import src.avoidance_base as avoidance_base
+
+        previous = avoidance_base.CLOUD_RPC_TIMEOUT_S
+        avoidance_base.CLOUD_RPC_TIMEOUT_S = 0.05
+        try:
+            started = time.monotonic()
+            await base._refresh_clouds()
+            assert time.monotonic() - started < 0.5
+            assert "cam" not in base._clouds
+            await base._refresh_clouds()
+            assert "cam" in base._clouds
+        finally:
+            avoidance_base.CLOUD_RPC_TIMEOUT_S = previous
+
+    asyncio.run(_run())
+
+
 def test_avoidance_status_is_not_forwarded():
     async def _run() -> None:
         base, child = _ready(np.empty((0, 2)))

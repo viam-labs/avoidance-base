@@ -6,7 +6,7 @@ The module provides one model, `viam-labs:base:avoidance` (`rdk:component:base`)
 
 Point clouds come from any camera that implements `GetPointCloud` (lidar, depth camera, ultrasonic models that publish a cloud, and so on). Each cloud is transformed into the underlying base frame with the machine frame system. A camera is ignored, and driving stays stopped, until that camera's frame parents to the configured base. A camera parented to `world` does not count.
 
-`GetPointCloud` runs in the background at `image_rate_hz`. Drive commands use the cached cloud and do not wait on the camera. If any camera's cloud is older than `source_timeout_s`, or the frame chain is unresolved, the safe command is zero.
+`GetPointCloud` runs in the background at `image_rate_hz`. Drive commands use the cached cloud and do not wait on the camera. If any camera's cloud is older than `source_timeout_s`, or the frame chain is unresolved, the safe command is zero. A camera or base call that never returns is abandoned, so the next tick can drive again instead of staying stopped until the module is restarted.
 
 ## Configuration
 
