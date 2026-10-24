@@ -63,7 +63,9 @@ class GuardResult:
     free_m: float
 
 
-def _poses_along(twist: Twist, times: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _poses_along(
+    twist: Twist, times: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Origin pose in the current base frame after ``times`` seconds."""
     vx, vy, wz = twist.vx_mps, twist.vy_mps, twist.wz_rad_s
     if abs(wz) < 1e-6:
@@ -177,7 +179,9 @@ def _hit_counts(
         )
     if near_points.size:
         floor = np.maximum(cfg.min_gap_m, clearance[near] - cfg.near_slack_m)
-        distance = _clearance_along(xs, ys, thetas, near_points, half_width, half_length)
+        distance = _clearance_along(
+            xs, ys, thetas, near_points, half_width, half_length
+        )
         counts += (distance < floor[None, :]).sum(axis=1)
     return counts
 

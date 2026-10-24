@@ -54,7 +54,11 @@ def parse_pcd(raw: bytes) -> np.ndarray:
         return np.empty((0, 3))
 
     if data_fmt == "ascii":
-        rows = [row.split() for row in body.decode("ascii", errors="replace").splitlines() if row.strip()]
+        rows = [
+            row.split()
+            for row in body.decode("ascii", errors="replace").splitlines()
+            if row.strip()
+        ]
         if not rows:
             return np.empty((0, 3))
         array = np.array(rows, dtype=float)
@@ -88,7 +92,9 @@ def parse_pcd(raw: bytes) -> np.ndarray:
     names = set(structured.dtype.names or ())
     if not {"x", "y", "z"} <= names:
         return np.empty((0, 3))
-    return np.stack([structured["x"], structured["y"], structured["z"]], axis=1).astype(float)
+    return np.stack([structured["x"], structured["y"], structured["z"]], axis=1).astype(
+        float
+    )
 
 
 def cloud_to_millimetres(points: np.ndarray) -> np.ndarray:
