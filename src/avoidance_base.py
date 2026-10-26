@@ -107,25 +107,17 @@ class AvoidanceBase(Base):
         cameras = attrs.get("cameras")
         if not isinstance(base_name, str) or not base_name:
             raise ValueError("base is required")
-        if (
-            not isinstance(cameras, list)
-            or not cameras
-            or not all(isinstance(name, str) and name for name in cameras)
-        ):
+        if not isinstance(cameras, list) or not cameras or not all(isinstance(name, str) and name for name in cameras):
             raise ValueError("cameras must be a non-empty list of camera names")
         return [base_name, *cameras], []
 
     @classmethod
-    def new(
-        cls, config: ComponentConfig, dependencies: Mapping[ResourceName, ResourceBase]
-    ) -> Self:
+    def new(cls, config: ComponentConfig, dependencies: Mapping[ResourceName, ResourceBase]) -> Self:
         base = cls(config.name)
         base.reconfigure(config, dependencies)
         return base
 
-    def reconfigure(
-        self, config: ComponentConfig, dependencies: Mapping[ResourceName, ResourceBase]
-    ) -> None:
+    def reconfigure(self, config: ComponentConfig, dependencies: Mapping[ResourceName, ResourceBase]) -> None:
         attrs = struct_to_dict(config.attributes)
         base_name = str(attrs["base"])
         camera_names = [str(name) for name in attrs["cameras"]]
@@ -169,12 +161,8 @@ class AvoidanceBase(Base):
         self._robot_radius_m = _positive(attrs, "robot_radius", DEFAULT_ROBOT_RADIUS_M)
         self._length_override = _optional_positive(attrs, "footprint_length_m")
         self._width_override = _optional_positive(attrs, "footprint_width_m")
-        self._assumed_max_linear_mps = _positive(
-            attrs, "assumed_max_linear_mps", DEFAULT_ASSUMED_MAX_LINEAR_MPS
-        )
-        self._assumed_max_angular_dps = _positive(
-            attrs, "assumed_max_angular_dps", DEFAULT_ASSUMED_MAX_ANGULAR_DPS
-        )
+        self._assumed_max_linear_mps = _positive(attrs, "assumed_max_linear_mps", DEFAULT_ASSUMED_MAX_LINEAR_MPS)
+        self._assumed_max_angular_dps = _positive(attrs, "assumed_max_angular_dps", DEFAULT_ASSUMED_MAX_ANGULAR_DPS)
         length, width = resolve_footprint(
             None,
             length_m=self._length_override,
@@ -190,9 +178,7 @@ class AvoidanceBase(Base):
             width_m=width_m,
             padding_m=_positive(attrs, "padding_m", DEFAULT_PADDING_M),
             stop_gap_m=_nonnegative(attrs, "stop_gap_m", DEFAULT_STOP_GAP_M),
-            time_to_collision_s=_positive(
-                attrs, "time_to_collision_s", DEFAULT_TIME_TO_COLLISION_S
-            ),
+            time_to_collision_s=_positive(attrs, "time_to_collision_s", DEFAULT_TIME_TO_COLLISION_S),
             min_points=max(1, int(_positive(attrs, "min_points", DEFAULT_MIN_POINTS))),
         )
 
@@ -367,9 +353,7 @@ class AvoidanceBase(Base):
             )
             self._clouds[name] = (time.monotonic(), points)
 
-        results = await asyncio.gather(
-            *(_one(name) for name in self._camera_names), return_exceptions=True
-        )
+        results = await asyncio.gather(*(_one(name) for name in self._camera_names), return_exceptions=True)
         for name, result in zip(self._camera_names, results):
             if isinstance(result, Exception):
                 LOGGER.warning("avoidance %r camera %r failed: %s", self.name, name, result)
@@ -691,9 +675,7 @@ class AvoidanceBase(Base):
                             self._writing = False
                 step = min(period, remaining / max(speed, 1e-6))
                 await asyncio.sleep(step)
-                traveled = (
-                    abs(result.twist.wz_rad_s) if angular else result.twist.planar_speed
-                ) * step
+                traveled = (abs(result.twist.wz_rad_s) if angular else result.twist.planar_speed) * step
                 remaining -= traveled
         finally:
             if self._motion_token is token:

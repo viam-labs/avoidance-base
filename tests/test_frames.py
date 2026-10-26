@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from viam.proto.common import Geometry, Pose, PoseInFrame, RectangularPrism, Transform, Vector3
 from viam.proto.robot import FrameSystemConfig
+
 from src.frames import (
     base_box_forward_lateral,
     pose_matrix_in_destination,
@@ -14,9 +15,7 @@ from src.frames import (
 def _part(name: str, parent: str, pose: Pose, box: tuple[float, float, float] | None = None):
     geometry = None
     if box is not None:
-        geometry = Geometry(
-            box=RectangularPrism(dims_mm=Vector3(x=box[0], y=box[1], z=box[2]))
-        )
+        geometry = Geometry(box=RectangularPrism(dims_mm=Vector3(x=box[0], y=box[1], z=box[2])))
     return FrameSystemConfig(
         frame=Transform(
             reference_frame=name,

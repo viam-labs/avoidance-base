@@ -56,9 +56,7 @@ def _ready(points: np.ndarray) -> tuple[AvoidanceBase, _Child]:
 
 
 def test_validate_config_requires_base_and_cameras():
-    config = ComponentConfig(
-        attributes=dict_to_struct({"base": "cart", "cameras": ["front", "rear"]})
-    )
+    config = ComponentConfig(attributes=dict_to_struct({"base": "cart", "cameras": ["front", "rear"]}))
     required, optional = AvoidanceBase.validate_config(config)
     assert list(required) == ["cart", "front", "rear"]
     assert list(optional) == []
@@ -117,9 +115,7 @@ def test_a_stuck_child_command_does_not_hold_the_lock():
             await release.wait()
 
         child.set_velocity = _set_velocity  # type: ignore[method-assign]
-        command = asyncio.create_task(
-            base.set_velocity(Vector3(x=0, y=200, z=0), Vector3(x=0, y=0, z=0))
-        )
+        command = asyncio.create_task(base.set_velocity(Vector3(x=0, y=200, z=0), Vector3(x=0, y=0, z=0)))
         await started.wait()
         await asyncio.wait_for(base.stop(), timeout=0.5)
         assert child.stopped >= 1

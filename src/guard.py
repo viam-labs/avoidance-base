@@ -111,9 +111,7 @@ def _result(twist: Twist, scale: float, free_m: float) -> GuardResult:
     return GuardResult(twist.scaled(scale), _action_for(scale), free_m)
 
 
-def _body_clearance(
-    points: np.ndarray, half_width: float, half_length: float
-) -> np.ndarray:
+def _body_clearance(points: np.ndarray, half_width: float, half_length: float) -> np.ndarray:
     """Distance outside the body rectangle. Zero when a point is inside it."""
     if points.size == 0:
         return np.empty(0)
@@ -264,9 +262,7 @@ def _regulate_spin(
     steps = max(1, min(int(math.ceil(horizon / step)), 400))
     angles = (np.arange(steps) + 1) * step
     signed = math.copysign(1.0, twist.wz_rad_s) * angles
-    counts = _hit_counts(
-        np.zeros(steps), np.zeros(steps), signed, points, cfg, half_width, half_length
-    )
+    counts = _hit_counts(np.zeros(steps), np.zeros(steps), signed, points, cfg, half_width, half_length)
     hits = np.flatnonzero(counts >= min_points)
     if hits.size == 0:
         return _result(twist, 1.0, math.inf)
