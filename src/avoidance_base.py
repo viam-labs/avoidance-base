@@ -52,7 +52,8 @@ DEFAULT_ASSUMED_MAX_LINEAR_MPS = 0.5
 CLOUD_RPC_TIMEOUT_S = 2.0
 CHILD_RPC_TIMEOUT_S = 1.0
 DEFAULT_ASSUMED_MAX_ANGULAR_DPS = 90.0
-MAX_CLOUD_POINTS = 8000
+MAX_CLOUD_POINTS = 2500
+GUARD_MAX_POINTS = 2000
 
 
 class ObstacleStop(RuntimeError):
@@ -241,7 +242,11 @@ class AvoidanceBase(Base):
 
     async def _image_loop(self, gen: int) -> None:
         period = 1.0 / self._image_rate_hz
+        next_due = time.monotonic()
         while gen == self._gen and not self._closed:
+            now = time.monotonic()
+            if now < next_due:
+                await asyncio.sleep(next_due - now)
             started = time.monotonic()
             try:
                 await self._refresh_frames()
@@ -250,7 +255,8 @@ class AvoidanceBase(Base):
                 raise
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("avoidance %r image refresh failed: %s", self.name, exc)
-            await asyncio.sleep(max(0.0, period - (time.monotonic() - started)))
+            # Skip backlog instead of spinning catch-up refreshes that peg CPU.
+            next_due = max(started + period, time.monotonic())
 
     def _note_frame_error(self, message: str) -> None:
         self._frames_ok = False
@@ -380,7 +386,11 @@ class AvoidanceBase(Base):
                 chunks.append(cached[1])
         if not chunks:
             return np.empty((0, 2)), False
-        return np.concatenate(chunks, axis=0), False
+        points = np.concatenate(chunks, axis=0)
+        if len(points) > GUARD_MAX_POINTS:
+            step = int(math.ceil(len(points) / float(GUARD_MAX_POINTS)))
+            points = points[:: max(1, step)]
+        return points, False
 
     def _evaluate(self, twist: Twist) -> GuardResult:
         points, stale = self._observation()
