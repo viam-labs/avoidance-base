@@ -2,14 +2,7 @@
 
 from __future__ import annotations
 
-from viam.proto.common import (
-    Geometry,
-    Pose,
-    PoseInFrame,
-    RectangularPrism,
-    Transform,
-    Vector3,
-)
+from viam.proto.common import Geometry, Pose, PoseInFrame, RectangularPrism, Transform, Vector3
 from viam.proto.robot import FrameSystemConfig
 
 from src.frames import (
@@ -19,14 +12,10 @@ from src.frames import (
 )
 
 
-def _part(
-    name: str, parent: str, pose: Pose, box: tuple[float, float, float] | None = None
-):
+def _part(name: str, parent: str, pose: Pose, box: tuple[float, float, float] | None = None):
     geometry = None
     if box is not None:
-        geometry = Geometry(
-            box=RectangularPrism(dims_mm=Vector3(x=box[0], y=box[1], z=box[2]))
-        )
+        geometry = Geometry(box=RectangularPrism(dims_mm=Vector3(x=box[0], y=box[1], z=box[2])))
     return FrameSystemConfig(
         frame=Transform(
             reference_frame=name,
@@ -70,14 +59,10 @@ def test_camera_mounted_through_a_link_on_the_base():
     assert transform[2, 3] == 200
     box = base_box_forward_lateral(configs, "cart")
     assert box == (0.8, 0.4)
-    length, width = resolve_footprint(
-        box, length_m=None, width_m=0.5, robot_radius_m=0.25
-    )
+    length, width = resolve_footprint(box, length_m=None, width_m=0.5, robot_radius_m=0.25)
     assert length == 0.8
     assert width == 0.5
-    length, width = resolve_footprint(
-        None, length_m=None, width_m=None, robot_radius_m=0.25
-    )
+    length, width = resolve_footprint(None, length_m=None, width_m=None, robot_radius_m=0.25)
     assert (length, width) == (0.5, 0.5)
 
 

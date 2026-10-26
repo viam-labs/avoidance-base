@@ -175,9 +175,7 @@ async def abandon_after(awaitable, timeout_s: float):
     return task.result()
 
 
-async def fetch_frame_system_config(
-    robot, *, timeout_s: float = FRAME_SYSTEM_TIMEOUT_S
-) -> list[Any]:
+async def fetch_frame_system_config(robot, *, timeout_s: float = FRAME_SYSTEM_TIMEOUT_S) -> list[Any]:
     """``robot.get_frame_system_config()`` on the caller's event loop."""
     configs = await abandon_after(robot.get_frame_system_config(), timeout_s)
     return list(configs)

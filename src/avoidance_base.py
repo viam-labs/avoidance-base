@@ -100,33 +100,23 @@ class AvoidanceBase(Base):
         self._closed = False
 
     @classmethod
-    def validate_config(
-        cls, config: ComponentConfig
-    ) -> tuple[Sequence[str], Sequence[str]]:
+    def validate_config(cls, config: ComponentConfig) -> tuple[Sequence[str], Sequence[str]]:
         attrs = struct_to_dict(config.attributes)
         base_name = attrs.get("base")
         cameras = attrs.get("cameras")
         if not isinstance(base_name, str) or not base_name:
             raise ValueError("base is required")
-        if (
-            not isinstance(cameras, list)
-            or not cameras
-            or not all(isinstance(name, str) and name for name in cameras)
-        ):
+        if not isinstance(cameras, list) or not cameras or not all(isinstance(name, str) and name for name in cameras):
             raise ValueError("cameras must be a non-empty list of camera names")
         return [base_name, *cameras], []
 
     @classmethod
-    def new(
-        cls, config: ComponentConfig, dependencies: Mapping[ResourceName, ResourceBase]
-    ) -> Self:
+    def new(cls, config: ComponentConfig, dependencies: Mapping[ResourceName, ResourceBase]) -> Self:
         base = cls(config.name)
         base.reconfigure(config, dependencies)
         return base
 
-    def reconfigure(
-        self, config: ComponentConfig, dependencies: Mapping[ResourceName, ResourceBase]
-    ) -> None:
+    def reconfigure(self, config: ComponentConfig, dependencies: Mapping[ResourceName, ResourceBase]) -> None:
         attrs = struct_to_dict(config.attributes)
         base_name = str(attrs["base"])
         camera_names = [str(name) for name in attrs["cameras"]]
@@ -161,12 +151,8 @@ class AvoidanceBase(Base):
         self._cameras = cameras
         self._camera_names = camera_names
         self._base_name = base_name
-        self._source_timeout_s = _positive(
-            attrs, "source_timeout_s", DEFAULT_SOURCE_TIMEOUT_S
-        )
-        self._control_rate_hz = _positive(
-            attrs, "control_rate_hz", DEFAULT_CONTROL_RATE_HZ
-        )
+        self._source_timeout_s = _positive(attrs, "source_timeout_s", DEFAULT_SOURCE_TIMEOUT_S)
+        self._control_rate_hz = _positive(attrs, "control_rate_hz", DEFAULT_CONTROL_RATE_HZ)
         self._image_rate_hz = _positive(attrs, "image_rate_hz", DEFAULT_IMAGE_RATE_HZ)
         self._z_min_m = _float(attrs, "z_min", DEFAULT_Z_MIN_M)
         self._z_max_m = _float(attrs, "z_max", DEFAULT_Z_MAX_M)
@@ -174,12 +160,8 @@ class AvoidanceBase(Base):
         self._robot_radius_m = _positive(attrs, "robot_radius", DEFAULT_ROBOT_RADIUS_M)
         self._length_override = _optional_positive(attrs, "footprint_length_m")
         self._width_override = _optional_positive(attrs, "footprint_width_m")
-        self._assumed_max_linear_mps = _positive(
-            attrs, "assumed_max_linear_mps", DEFAULT_ASSUMED_MAX_LINEAR_MPS
-        )
-        self._assumed_max_angular_dps = _positive(
-            attrs, "assumed_max_angular_dps", DEFAULT_ASSUMED_MAX_ANGULAR_DPS
-        )
+        self._assumed_max_linear_mps = _positive(attrs, "assumed_max_linear_mps", DEFAULT_ASSUMED_MAX_LINEAR_MPS)
+        self._assumed_max_angular_dps = _positive(attrs, "assumed_max_angular_dps", DEFAULT_ASSUMED_MAX_ANGULAR_DPS)
         length, width = resolve_footprint(
             None,
             length_m=self._length_override,
@@ -189,17 +171,13 @@ class AvoidanceBase(Base):
         self._set_guard(length, width, attrs)
         self._spawn()
 
-    def _set_guard(
-        self, length_m: float, width_m: float, attrs: Mapping[str, Any]
-    ) -> None:
+    def _set_guard(self, length_m: float, width_m: float, attrs: Mapping[str, Any]) -> None:
         self._guard = GuardConfig(
             length_m=length_m,
             width_m=width_m,
             padding_m=_positive(attrs, "padding_m", DEFAULT_PADDING_M),
             stop_gap_m=_nonnegative(attrs, "stop_gap_m", DEFAULT_STOP_GAP_M),
-            time_to_collision_s=_positive(
-                attrs, "time_to_collision_s", DEFAULT_TIME_TO_COLLISION_S
-            ),
+            time_to_collision_s=_positive(attrs, "time_to_collision_s", DEFAULT_TIME_TO_COLLISION_S),
             min_points=max(1, int(_positive(attrs, "min_points", DEFAULT_MIN_POINTS))),
         )
 
@@ -216,9 +194,7 @@ class AvoidanceBase(Base):
             self._start_loop(loop, "control", gen),
         ]
 
-    def _start_loop(
-        self, loop: asyncio.AbstractEventLoop, which: str, gen: int
-    ) -> asyncio.Task:
+    def _start_loop(self, loop: asyncio.AbstractEventLoop, which: str, gen: int) -> asyncio.Task:
         body = self._image_loop(gen) if which == "images" else self._control_loop(gen)
         task = loop.create_task(body, name=f"{self.name}-{which}")
 
@@ -226,9 +202,7 @@ class AvoidanceBase(Base):
             if self._closed or gen != self._gen or done.cancelled():
                 return
             exc = done.exception()
-            LOGGER.error(
-                "avoidance %r %s loop exited (%s); restarting", self.name, which, exc
-            )
+            LOGGER.error("avoidance %r %s loop exited (%s); restarting", self.name, which, exc)
             try:
                 restarted = self._start_loop(asyncio.get_running_loop(), which, gen)
             except RuntimeError:
@@ -373,14 +347,10 @@ class AvoidanceBase(Base):
             )
             self._clouds[name] = (time.monotonic(), points)
 
-        results = await asyncio.gather(
-            *(_one(name) for name in self._camera_names), return_exceptions=True
-        )
+        results = await asyncio.gather(*(_one(name) for name in self._camera_names), return_exceptions=True)
         for name, result in zip(self._camera_names, results):
             if isinstance(result, Exception):
-                LOGGER.warning(
-                    "avoidance %r camera %r failed: %s", self.name, name, result
-                )
+                LOGGER.warning("avoidance %r camera %r failed: %s", self.name, name, result)
 
     async def _control_loop(self, gen: int) -> None:
         period = 1.0 / self._control_rate_hz
@@ -421,9 +391,7 @@ class AvoidanceBase(Base):
                 self._block_reason = reason
         elif self._block_reason:
             self._block_reason = ""
-        result = decide(
-            twist, points, self._guard, frames_ok=self._frames_ok, stale=stale
-        )
+        result = decide(twist, points, self._guard, frames_ok=self._frames_ok, stale=stale)
         self._last_result = result
         return result
 
@@ -436,9 +404,7 @@ class AvoidanceBase(Base):
                 stale.append(f"{name} has no cloud")
             elif now - cached[0] > self._source_timeout_s:
                 stale.append(f"{name} cloud is {now - cached[0]:.1f}s old")
-        return (
-            "camera cloud stale: " + ", ".join(stale) if stale else "camera cloud stale"
-        )
+        return "camera cloud stale: " + ", ".join(stale) if stale else "camera cloud stale"
 
     async def _publish(self, result: GuardResult, *, mode_expected: str) -> None:
         async with self._lock():
@@ -473,26 +439,18 @@ class AvoidanceBase(Base):
             else:
                 await abandon_after(
                     child.set_velocity(
-                        Vector3(
-                            x=result.twist.vx_mps * 1000.0,
-                            y=result.twist.vy_mps * 1000.0,
-                            z=0.0,
-                        ),
+                        Vector3(x=result.twist.vx_mps * 1000.0, y=result.twist.vy_mps * 1000.0, z=0.0),
                         Vector3(x=0.0, y=0.0, z=math.degrees(result.twist.wz_rad_s)),
                     ),
                     CHILD_RPC_TIMEOUT_S,
                 )
         except TimeoutError:
-            LOGGER.warning(
-                "avoidance %r underlying base command timed out; will retry", self.name
-            )
+            LOGGER.warning("avoidance %r underlying base command timed out; will retry", self.name)
             async with self._lock():
                 if self._last_key == key:
                     self._last_key = None
         except Exception:
-            LOGGER.warning(
-                "avoidance %r underlying base command failed; will retry", self.name
-            )
+            LOGGER.warning("avoidance %r underlying base command failed; will retry", self.name)
             async with self._lock():
                 if self._last_key == key:
                     self._last_key = None
@@ -679,19 +637,12 @@ class AvoidanceBase(Base):
                 if await operation.is_cancelled():
                     return
                 result = self._evaluate(twist)
-                if (
-                    result.action == "stop"
-                    or result.twist.planar_speed + abs(result.twist.wz_rad_s) < 1e-4
-                ):
+                if result.action == "stop" or result.twist.planar_speed + abs(result.twist.wz_rad_s) < 1e-4:
                     raise ObstacleStop(
                         f"{what} stopped with {remaining:.3f} remaining: obstacle inside stopping distance"
                     )
                 async with self._lock():
-                    if (
-                        self._motion_token is not token
-                        or self._mode != "trajectory"
-                        or self._writing
-                    ):
+                    if self._motion_token is not token or self._mode != "trajectory" or self._writing:
                         return
                     key = _twist_key(result)
                     if key == self._last_key:
@@ -714,9 +665,7 @@ class AvoidanceBase(Base):
                             self._writing = False
                 step = min(period, remaining / max(speed, 1e-6))
                 await asyncio.sleep(step)
-                traveled = (
-                    abs(result.twist.wz_rad_s) if angular else result.twist.planar_speed
-                ) * step
+                traveled = (abs(result.twist.wz_rad_s) if angular else result.twist.planar_speed) * step
                 remaining -= traveled
         finally:
             if self._motion_token is token:
@@ -730,9 +679,7 @@ class AvoidanceBase(Base):
                     try:
                         await abandon_after(child.stop(), CHILD_RPC_TIMEOUT_S)
                     except TimeoutError:
-                        LOGGER.warning(
-                            "avoidance %r underlying base stop timed out", self.name
-                        )
+                        LOGGER.warning("avoidance %r underlying base stop timed out", self.name)
 
     async def is_moving(self) -> bool:
         if self._mode == "trajectory":
@@ -741,24 +688,18 @@ class AvoidanceBase(Base):
             return False
         return await self._child.is_moving()
 
-    async def get_properties(
-        self, *, timeout: Optional[float] = None, **kwargs
-    ) -> Base.Properties:
+    async def get_properties(self, *, timeout: Optional[float] = None, **kwargs) -> Base.Properties:
         del kwargs
         if self._child is None:
             raise RuntimeError(f"avoidance base {self.name!r} has no underlying base")
         return await self._child.get_properties(timeout=timeout)
 
-    async def get_geometries(
-        self, *, extra: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None
-    ):
+    async def get_geometries(self, *, extra: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None):
         if self._child is None:
             raise RuntimeError(f"avoidance base {self.name!r} has no underlying base")
         return await self._child.get_geometries(extra=extra, timeout=timeout)
 
-    async def get_status(
-        self, *, timeout: Optional[float] = None, **kwargs
-    ) -> Mapping[str, ValueTypes]:
+    async def get_status(self, *, timeout: Optional[float] = None, **kwargs) -> Mapping[str, ValueTypes]:
         del kwargs
         if self._child is None:
             return self._status()

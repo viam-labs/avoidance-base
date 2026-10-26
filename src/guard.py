@@ -63,9 +63,7 @@ class GuardResult:
     free_m: float
 
 
-def _poses_along(
-    twist: Twist, times: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _poses_along(twist: Twist, times: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Origin pose in the current base frame after ``times`` seconds."""
     vx, vy, wz = twist.vx_mps, twist.vy_mps, twist.wz_rad_s
     if abs(wz) < 1e-6:
@@ -113,9 +111,7 @@ def _result(twist: Twist, scale: float, free_m: float) -> GuardResult:
     return GuardResult(twist.scaled(scale), _action_for(scale), free_m)
 
 
-def _body_clearance(
-    points: np.ndarray, half_width: float, half_length: float
-) -> np.ndarray:
+def _body_clearance(points: np.ndarray, half_width: float, half_length: float) -> np.ndarray:
     """Distance outside the body rectangle. Zero when a point is inside it."""
     if points.size == 0:
         return np.empty(0)
@@ -179,9 +175,7 @@ def _hit_counts(
         )
     if near_points.size:
         floor = np.maximum(cfg.min_gap_m, clearance[near] - cfg.near_slack_m)
-        distance = _clearance_along(
-            xs, ys, thetas, near_points, half_width, half_length
-        )
+        distance = _clearance_along(xs, ys, thetas, near_points, half_width, half_length)
         counts += (distance < floor[None, :]).sum(axis=1)
     return counts
 
@@ -251,9 +245,7 @@ def _regulate_spin(
     steps = max(1, min(int(math.ceil(horizon / step)), 400))
     angles = (np.arange(steps) + 1) * step
     signed = math.copysign(1.0, twist.wz_rad_s) * angles
-    counts = _hit_counts(
-        np.zeros(steps), np.zeros(steps), signed, points, cfg, half_width, half_length
-    )
+    counts = _hit_counts(np.zeros(steps), np.zeros(steps), signed, points, cfg, half_width, half_length)
     hits = np.flatnonzero(counts >= min_points)
     if hits.size == 0:
         return _result(twist, 1.0, math.inf)
