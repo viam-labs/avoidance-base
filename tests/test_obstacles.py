@@ -58,9 +58,7 @@ def test_ascii_and_binary_pcd_match():
 
 
 def test_huge_clouds_are_downsampled_before_the_transform():
-    transform = pose_matrix_in_destination(
-        _camera_on_base(_identity(0, 200, 300)), "cam", "cart"
-    )
+    transform = pose_matrix_in_destination(_camera_on_base(_identity(0, 200, 300)), "cam", "cart")
     assert transform is not None
     # A VGA-scale metre cloud with one real obstacle ahead of the bumper.
     cloud = np.zeros((200_000, 3), dtype=np.float32)
