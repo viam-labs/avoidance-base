@@ -220,11 +220,28 @@ def _regulate_arc(
     steps = max(1, min(steps, 400))
     times = (np.arange(steps) + 1) * dt
     xs, ys, thetas = _poses_along(twist, times)
-    counts = _hit_counts(xs, ys, thetas, points, cfg, half_width, half_length)
-    hits = np.flatnonzero(counts >= min_points)
-    if hits.size == 0:
+    # Scan in short chunks so a nearby wall does not build a full
+    # steps×points temporary for the far horizon.
+    chunk = 16
+    hit_index: int | None = None
+    for start in range(0, steps, chunk):
+        end = min(start + chunk, steps)
+        counts = _hit_counts(
+            xs[start:end],
+            ys[start:end],
+            thetas[start:end],
+            points,
+            cfg,
+            half_width,
+            half_length,
+        )
+        hits = np.flatnonzero(counts >= min_points)
+        if hits.size:
+            hit_index = start + int(hits[0])
+            break
+    if hit_index is None:
         return _result(twist, 1.0, math.inf)
-    free_m = float(speed * times[int(hits[0])])
+    free_m = float(speed * times[hit_index])
     if free_m <= cfg.stop_gap_m:
         return _result(twist, 0.0, free_m)
     allowed = (free_m - cfg.stop_gap_m) / cfg.time_to_collision_s

@@ -125,7 +125,7 @@ def prepare_base_points(
     footprint_length_m: float,
     footprint_width_m: float,
     max_range_m: float,
-    max_points: int = 8000,
+    max_points: int = 2500,
 ) -> np.ndarray:
     """Return ``(N, 2)`` obstacle XY in the base frame, metres.
 
@@ -133,23 +133,35 @@ def prepare_base_points(
     Coordinates may be millimetres or metres; metres are detected from the
     cloud's scale. Invalid and ``(0, 0, 0)`` pixels are dropped. Points inside
     the unpadded footprint are dropped so the chassis does not count as an obstacle.
+
+    Depth and lidar clouds are often hundreds of thousands of returns. The
+    expensive transform and height filter run only after an early stride
+    downsample, so a 10 Hz refresh cannot pin every core.
     """
-    points = np.asarray(points, dtype=float)
+    points = np.asarray(points, dtype=np.float32)
     if points.ndim != 2 or points.shape[1] < 3 or points.size == 0:
-        return np.empty((0, 2))
-    points = cloud_to_millimetres(points[:, :3])
+        return np.empty((0, 2), dtype=np.float32)
+    points = points[:, :3]
+    # Skip most invalid depth pixels before the median / transform work.
     keep = np.isfinite(points).all(axis=1) & np.any(points != 0.0, axis=1)
     points = points[keep]
     if points.size == 0:
-        return np.empty((0, 2))
+        return np.empty((0, 2), dtype=np.float32)
+    # Keep a few times the final budget so height / footprint filtering still
+    # has room to drop returns, without transforming a full VGA depth cloud.
+    pre_cap = max(int(max_points) * 4, int(max_points))
+    points = _downsample(points, pre_cap)
+    points = cloud_to_millimetres(points)
+    if points.size == 0:
+        return np.empty((0, 2), dtype=np.float32)
 
-    rotation = np.asarray(base_t_camera_mm, dtype=float)[:3, :3]
-    translation = np.asarray(base_t_camera_mm, dtype=float)[:3, 3]
-    transformed_m = (points @ rotation.T + translation) / 1000.0
+    rotation = np.asarray(base_t_camera_mm, dtype=np.float32)[:3, :3]
+    translation = np.asarray(base_t_camera_mm, dtype=np.float32)[:3, 3]
+    transformed_m = (points @ rotation.T + translation) * np.float32(0.001)
     band = (transformed_m[:, 2] >= z_min_m) & (transformed_m[:, 2] <= z_max_m)
     transformed_m = transformed_m[band]
     if transformed_m.size == 0:
-        return np.empty((0, 2))
+        return np.empty((0, 2), dtype=np.float32)
 
     xy = transformed_m[:, :2]
     half_length = float(footprint_length_m) / 2.0
@@ -158,7 +170,7 @@ def prepare_base_points(
         inside = (np.abs(xy[:, 0]) <= half_width) & (np.abs(xy[:, 1]) <= half_length)
         xy = xy[~inside]
     if xy.size == 0:
-        return np.empty((0, 2))
+        return np.empty((0, 2), dtype=np.float32)
     if max_range_m > 0.0:
         radial = np.hypot(xy[:, 0], xy[:, 1])
         xy = xy[radial <= max_range_m]

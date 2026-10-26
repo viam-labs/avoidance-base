@@ -57,6 +57,30 @@ def test_ascii_and_binary_pcd_match():
     assert np.allclose(binary_points, points)
 
 
+def test_huge_clouds_are_downsampled_before_the_transform():
+    transform = pose_matrix_in_destination(
+        _camera_on_base(_identity(0, 200, 300)), "cam", "cart"
+    )
+    assert transform is not None
+    # A VGA-scale metre cloud with one real obstacle ahead of the bumper.
+    cloud = np.zeros((200_000, 3), dtype=np.float32)
+    cloud[:, 1] = 3.0
+    cloud[:, 2] = 0.2
+    cloud[0] = (0.0, 1.0, 0.2)
+    xy = prepare_base_points(
+        cloud,
+        transform,
+        z_min_m=0.05,
+        z_max_m=2.0,
+        footprint_length_m=0.6,
+        footprint_width_m=0.4,
+        max_range_m=0.0,
+        max_points=2500,
+    )
+    assert 0 < len(xy) <= 2500
+    assert np.any(np.abs(xy[:, 1] - 1.2) < 0.05)
+
+
 def test_body_and_optical_points_land_in_front_of_the_base():
     optical = Pose(x=0, y=200, z=300, o_x=0, o_y=1, o_z=0, theta=-90)
     body = _identity(0, 200, 300)
